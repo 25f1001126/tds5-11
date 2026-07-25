@@ -144,14 +144,12 @@ async function createRun(body, headers) {
 
   let planResult;
   try {
-    const { sensitive, ...safeBody } = body; // never forwarded
+    const { sensitive, ...safeBody } = body;
     planResult = await planner.plan({ incident: safeBody.incident, toolCatalog: safeBody.toolCatalog, policy: safeBody.policy });
     closeSpan(chatSpan, { code: STATUS.OK });
   } catch (e) {
-    closeSpan(chatSpan, { code: STATUS.ERROR, message: String(e.message || e) });
-    finalizeSpans(run, 'failed');
-    run.status = 'failed';
-    throw new HttpError(502, `planning failed: ${e.message}`);
+    console.error('[engine] unexpected planner error, aborting to 500 for visibility:', e);
+    throw new HttpError(500, `planning failed: ${e.message}`);
   }
 
   run.diagnosis = { rootCause: planResult.rootCause, evidence: planResult.evidence };
