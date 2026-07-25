@@ -4,7 +4,7 @@
 const { HttpError } = require('./util');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const MODEL = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
 
 function extractEvidenceIds(transcript) {
   const ids = new Set();
