@@ -1,4 +1,3 @@
-require('dotenv').config?.(); // no-op if dotenv isn't installed; safe to remove
 const express = require('express');
 const engine = require('./engine');
 const { HttpError } = require('./util');
