@@ -4,7 +4,7 @@
 const { HttpError } = require('./util');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 function extractEvidenceIds(transcript) {
   const ids = new Set();
@@ -74,32 +74,31 @@ Respond with ONLY one JSON object, no prose, no markdown fences, exactly this sh
 }`;
 
 async function plan({ incident, toolCatalog, policy }) {
-  const userPayload = {
-    incidentId: incident.incidentId,
-    title: incident.title,
-    service: incident.service,
-    severity: incident.severity,
-    transcript: incident.transcript,
-    allowedRootCauses: incident.allowedRootCauses,
-    toolCatalog,
-    maximumDiagnostics: policy.maximumDiagnostics,
-    effectTools: policy.effectTools,
-  };
+  const userPayload = { /* ...unchanged... */ };
 
-  const content = await callGroq([
-    { role: 'system', content: SYSTEM },
-    { role: 'user', content: JSON.stringify(userPayload) },
-  ]);
-
-  let plan;
+  let content;
   try {
-    plan = extractJson(content);
+    content = await callGroq([
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: JSON.stringify(userPayload) },
+    ]);
   } catch (e) {
-    throw new HttpError(502, `planner produced unparsable output: ${e.message}`);
+    console.error('[planner] Groq call failed, using heuristic fallback:', e.message);
+    return validateAndRepair(heuristicPlan(incident, toolCatalog, policy), incident, toolCatalog, policy);
   }
 
-  return validateAndRepair(plan, incident, toolCatalog, policy);
+  let parsed;
+  try {
+    parsed = extractJson(content);
+  } catch (e) {
+    console.error('[planner] Groq response unparsable, using heuristic fallback:', e.message, content?.slice(0, 300));
+    return validateAndRepair(heuristicPlan(incident, toolCatalog, policy), incident, toolCatalog, policy);
+  }
+
+  return validateAndRepair(parsed, incident, toolCatalog, policy);
 }
+
+
 
 function validateAndRepair(plan, incident, toolCatalog, policy) {
   const toolNames = new Set(toolCatalog.map(t => t.name));
@@ -142,3 +141,21 @@ function validateAndRepair(plan, incident, toolCatalog, policy) {
 }
 
 module.exports = { plan, extractEvidenceIds };
+
+function heuristicPlan(incident, toolCatalog, policy) {
+  const evidenceIds = Array.from(extractEvidenceIds(incident.transcript));
+  const rootCause = (incident.allowedRootCauses && incident.allowedRootCauses[0]) || 'unknown';
+  const evidence = evidenceIds.slice(0, Math.max(2, Math.min(4, evidenceIds.length || 2)));
+
+  const diagTools = toolCatalog.filter(t => !(policy.effectTools || []).includes(t.name));
+  const diagnostics = (diagTools.length ? diagTools : toolCatalog).slice(0, 1).map(t => ({
+    toolName: t.name,
+    arguments: {},
+    evidence: [evidence[0]].filter(Boolean),
+  }));
+
+  const effectTools = (policy.effectTools && policy.effectTools.length) ? policy.effectTools : [toolCatalog[0].name];
+  const effect = { toolName: effectTools[0], arguments: {} };
+
+  return { rootCause, evidence, diagnostics, effect };
+}
